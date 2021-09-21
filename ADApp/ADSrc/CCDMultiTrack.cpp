@@ -19,10 +19,17 @@
 
 #include "CCDMultiTrack.h"
 
+/* define C99 standard __func__ to come from MS's __FUNCTION__ */
+#if defined ( _MSC_VER )
+#define __func__ __FUNCTION__
+#endif
+
 /** Parameter strings to tie into asyn records */
 static const char* CCDMultiTrackStartString = "CCD_MULTI_TRACK_START";
 static const char* CCDMultiTrackEndString = "CCD_MULTI_TRACK_END";
 static const char* CCDMultiTrackBinString = "CCD_MULTI_TRACK_BIN";
+
+static const char* driverName = "CCDMultiTrack";
 
 CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
 {
@@ -33,10 +40,14 @@ CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
     asynPortDriver->createParam(CCDMultiTrackStartString, asynParamInt32Array, &mCCDMultiTrackStart);
     asynPortDriver->createParam(CCDMultiTrackEndString, asynParamInt32Array, &mCCDMultiTrackEnd);
     asynPortDriver->createParam(CCDMultiTrackBinString, asynParamInt32Array, &mCCDMultiTrackBin);
+    printf("%s:%s params: Start=%d, End=%d, Bin=%d\n",
+            driverName, __func__,
+            mCCDMultiTrackStart, mCCDMultiTrackEnd, mCCDMultiTrackBin);
 }
 
 /** Set size of CCD */
 void CCDMultiTrack::setMaxSize(size_t maxSizeY) {
+    printf("%s:%s: setMaxSize(%zd)\n", driverName,__func__, maxSizeY);
     mMaxSizeY = maxSizeY;
     validate();
 }
@@ -54,15 +65,23 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
 
     std::vector<int> *puserArray = 0;
     if (function == mCCDMultiTrackStart) {
+        printf("%s:%s: setting Start[:%zd]\n",
+                driverName,__func__, nElements);
         puserArray = &mUserStart;
     }
     else if (function == mCCDMultiTrackEnd) {
+        printf("%s:%s: setting End[:%zd]\n",
+                driverName,__func__, nElements);
         puserArray = &mUserEnd;
     }
     else if (function == mCCDMultiTrackBin) {
+        printf("%s:%s: setting Bin[:%zd]\n",
+                driverName,__func__, nElements);
         puserArray = &mUserBin;
     }
     else {
+        printf("%s:%s: Unknown reason %d\n",
+                driverName,__func__, function);
         status = asynError;             // Not our parameter
     }
 
@@ -72,6 +91,8 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
             validate();
 
             for (unsigned m = 0; m < mMessages.size(); m++) {
+                printf("%s:%s: message %s\n",
+                        driverName,__func__, mMessages[m].c_str());
                 asynPrint(pasynUser, ASYN_TRACE_WARNING,
                         "CCDMultiTrack: %s\n", mMessages[m].c_str());
             }
@@ -98,6 +119,7 @@ void CCDMultiTrack::addMessage(const char *fmt, ...)
 void CCDMultiTrack::validate()
 {
     std::vector<NDDimension_t> regions;
+    mMessages.resize(0);
 
     size_t numRegions = mUserStart.size();
     if (numRegions > mMaxSizeY) {
@@ -129,6 +151,9 @@ void CCDMultiTrack::validate()
             region.offset = mUserStart[i];
         }
         // FIXME size, binning
+        printf("%s:%s region[%u] offset=%zd size=%zd binning=%d\n",
+                driverName,__func__,
+                i, region.offset, region.size, region.binning);
     }
 }
 
