@@ -48,11 +48,6 @@ class ADCORE_API CCDMultiTrack
     /** Set multi-track attributes on output NDArray */
     void storeTrackAttributes(NDAttributeList* pAttributeList);
 
-    /** Check and convert to a valid set of track definitions
-     * Reads mUserStart/End/Bin, sets mValid[] and mMessages[].
-     */
-    virtual void validate();
-
     /** Legacy methods */
     int CCDMultiTrackStart() const {
         return mCCDMultiTrackStart;
@@ -93,6 +88,14 @@ class ADCORE_API CCDMultiTrack
     std::vector<NDDimension_t> mValid;
     /** Messages from validation */
     std::vector<std::string> mMessages;
+
+    /** Check and convert to a valid set of track definitions
+     * Reads mUserStart/End/Bin, sets mValid[] and mMessages[].
+     * A subclass can override this, if it needs to apply more
+     * stringent constraints e.g. symmetry, binning range etc.
+     */
+    virtual void validate();
+
     /** For use within validate() */
     void addMessage(const char *fmt, ...)
         EPICS_PRINTF_STYLE(2,3);
