@@ -53,7 +53,7 @@ CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver, asynUser *pasynUser
 void CCDMultiTrack::setMaxSize(size_t maxSizeY) {
     TRACE("maxSizeY = %zd", maxSizeY);
     mMaxSizeY = maxSizeY;
-    validate();
+    _validate();
 }
 
 /** Handle array from user */
@@ -88,7 +88,7 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
     if (puserArray) {
         if (! (valueArray == *puserArray)) {
             *puserArray = valueArray;
-            validate();
+            _validate();
 
             for (unsigned m = 0; m < mMessages.size(); m++) {
                 TRACE("message %s", mMessages[m].c_str());
@@ -99,6 +99,28 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
     }
 
     return status;
+}
+
+void CCDMultiTrack::_validate()
+{
+    /* Call the virtual method to check/adjust; result in mValid */
+    validate();
+
+    /* Write adjusted values back */
+    std::vector<int> validStart(size());
+    std::vector<int> validEnd(size());
+    std::vector<int> validBin(size());
+    for (unsigned i = 0; i < size(); i++) {
+        validStart[i] = mValid[i].offset;
+        validEnd[i] = mValid[i].offset + mValid[i].size - 1;
+        validBin[i] = mValid[i].binning;
+    }
+    mPortDriver->doCallbacksInt32Array(&validStart[0], validStart.size(),
+            mCCDMultiTrackStart, 0);
+    mPortDriver->doCallbacksInt32Array(&validEnd[0], validEnd.size(),
+            mCCDMultiTrackEnd, 0);
+    mPortDriver->doCallbacksInt32Array(&validBin[0], validBin.size(),
+            mCCDMultiTrackBin, 0);
 }
 
 /** Helper for validate() */
@@ -197,6 +219,8 @@ void CCDMultiTrack::validate()
         TRACE("region[%u] offset=%zd size=%zd binning=%d",
                 i, region.offset, region.size, region.binning);
     }
+    /** Save the valid regions */
+    mValid = regions;
 }
 
 void CCDMultiTrack::storeTrackAttributes(NDAttributeList* pAttributeList)
