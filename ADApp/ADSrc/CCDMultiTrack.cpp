@@ -19,6 +19,7 @@
 
 #include "CCDMultiTrack.h"
 
+/** Parameter strings to tie into asyn records */
 static const char* CCDMultiTrackStartString = "CCD_MULTI_TRACK_START";
 static const char* CCDMultiTrackEndString = "CCD_MULTI_TRACK_END";
 static const char* CCDMultiTrackBinString = "CCD_MULTI_TRACK_BIN";
@@ -26,138 +27,138 @@ static const char* CCDMultiTrackBinString = "CCD_MULTI_TRACK_BIN";
 CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
 {
     mPortDriver = asynPortDriver;
+    /* Create parameters and get indices */
     asynPortDriver->createParam(CCDMultiTrackStartString, asynParamInt32Array, &mCCDMultiTrackStart);
     asynPortDriver->createParam(CCDMultiTrackEndString, asynParamInt32Array, &mCCDMultiTrackEnd);
     asynPortDriver->createParam(CCDMultiTrackBinString, asynParamInt32Array, &mCCDMultiTrackBin);
 }
 
+/** Set size of CCD */
+void CCDMultiTrack::setMaxSize(size_t maxSizeY) {
+    mMaxSizeY = maxSizeY;
+    validate();
+}
+
+/** Handle array from user */
+asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value, size_t nElements)
+{
+    int function = pasynUser->reason;   // Parameter index
+    asynStatus status = asynSuccess;
+
+    std::vector<int> valueArray(nElements);
+    for (size_t i = 0; i < nElements; i++) {
+        valueArray[i] = value[i];
+    }
+
+    std::vector<int> *puserArray = 0;
+    if (function == mCCDMultiTrackStart) {
+        puserArray = &mUserStart;
+    }
+    else if (function == mCCDMultiTrackEnd) {
+        puserArray = &mUserEnd;
+    }
+    else if (function == mCCDMultiTrackBin) {
+        puserArray = &mUserBin;
+    }
+    else {
+        status = asynError;             // Not our parameter
+    }
+
+    if (puserArray) {
+        if (! (valueArray == *puserArray)) {
+            *puserArray = valueArray;
+            validate();
+
+            for (unsigned m = 0; m < mMessages.size(); m++) {
+                asynPrint(pasynUser, ASYN_TRACE_WARNING,
+                        "CCDMultiTrack: %s\n", mMessages[m].c_str());
+            }
+        }
+    }
+
+    return status;
+}
+
+/** Helper for validate() */
+void CCDMultiTrack::addMessage(const char *fmt, ...)
+{
+    char buf[120];
+    va_list ap;
+    va_start(ap, fmt);
+    epicsVsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    mMessages.push_back(buf);
+}
+
+/** Derive valid regions from user settings.
+ * Record messages about any invalid values, adjusting where necessary.
+ */
+void CCDMultiTrack::validate()
+{
+    std::vector<NDDimension_t> regions;
+
+    size_t numRegions = mUserStart.size();
+    if (numRegions > mMaxSizeY) {
+        addMessage("More tracks (%d) than Y pixels", (int) numRegions);
+        numRegions = mMaxSizeY;
+    }
+    regions.resize(numRegions);
+
+    for (unsigned i = 0; i < numRegions; i++) {
+        NDDimension_t &region = regions[i];
+        int prevEnd = (i == 0) ? 0 : (regions[i-1].offset + regions[i-1].size);
+        if (mUserStart[i] < 0) {
+            addMessage("Track %d start (%d) less than 0",
+                    i+1, mUserStart[i]);
+            region.offset = 0;
+        } else if (i > 0 && mUserStart[i] < prevEnd) {
+            addMessage("Track %d start (%d) before end of previous (%d)",
+                    i+1, mUserStart[i], prevEnd);
+            region.offset = prevEnd;
+        } else if (mUserStart[i] > (int) mMaxSizeY - 1) {
+            addMessage("Track %d start (%d) beyond last row (%d)",
+                    i+1, mUserStart[i], (int) mMaxSizeY - 1);
+            region.offset = mMaxSizeY - 1;
+        } else if (mUserStart[i] > (int) (mMaxSizeY - (numRegions - i))) {
+            addMessage("Track %d start (%d) leaves no space for %d more track(s)",
+                    i+1, mUserStart[i], (int) numRegions - i - 1);
+            region.offset = mMaxSizeY - (numRegions - 1);
+        } else {
+            region.offset = mUserStart[i];
+        }
+        // FIXME size, binning
+    }
+}
+
 void CCDMultiTrack::storeTrackAttributes(NDAttributeList* pAttributeList)
 {
-    std::string ROIString = "ROI";
-    std::string TrackString = "Track ";
-    if (pAttributeList)
-    {
-        for (size_t TrackNum = 0; TrackNum < size(); TrackNum++)
-        {
+    if (pAttributeList) {
+        char name[20];
+        char desc[30];
+        for (size_t i = 0; i < mValid.size(); i++) {
+            int num = (int) i + 1;
             // Add new attributes listing.
-            char Buf[10];
-            epicsSnprintf(Buf, 10, "%zd", TrackNum + 1);
-            std::string TrackNumString = Buf;
-            std::string TrackStartName = ROIString + TrackNumString + "start";
-            std::string TrackStartDescription = TrackString + TrackNumString + " start";
-            int TrackStart = CCDMultiTrack::TrackStart(TrackNum);
-            pAttributeList->add(TrackStartName.c_str(), TrackStartDescription.c_str(), NDAttrInt32, &TrackStart);
-            // Set new attributes.
-            std::string TrackEndName = ROIString + TrackNumString + "end";
-            std::string TrackEndDescription = TrackString + TrackNumString + " end";
-            int TrackEnd = CCDMultiTrack::TrackEnd(TrackNum);
-            pAttributeList->add(TrackEndName.c_str(), TrackEndDescription.c_str(), NDAttrInt32, &TrackEnd);
-            // Set new attributes.
-            std::string TrackBinName = ROIString + TrackNumString + "bin";
-            std::string TrackBinDescription = TrackString + TrackNumString + " end";
-            int TrackBin = CCDMultiTrack::TrackBin(TrackNum);
-            pAttributeList->add(TrackBinName.c_str(), TrackBinDescription.c_str(), NDAttrInt32, &TrackBin);
+            epicsSnprintf(name, sizeof(name), "ROI%dstart", num);
+            epicsSnprintf(desc, sizeof(desc), "Track %d start", num);
+            int start = mValid[i].offset;
+            pAttributeList->add(name, desc, NDAttrInt32, &start);
+            epicsSnprintf(name, sizeof(name), "ROI%dend", num);
+            epicsSnprintf(desc, sizeof(desc), "Track %d end", num);
+            int end = start + mValid[i].size - 1;
+            pAttributeList->add(name, desc, NDAttrInt32, &end);
+            epicsSnprintf(name, sizeof(name), "ROI%dbin", num);
+            epicsSnprintf(desc, sizeof(desc), "Track %d binning", num);
+            int bin = mValid[i].binning;
+            pAttributeList->add(name, desc, NDAttrInt32, &bin);
         }
     }
 }
 
-void CCDMultiTrack::writeTrackStart(epicsInt32 *value, size_t nElements)
+size_t CCDMultiTrack::totalDataHeight() const
 {
-    std::vector<int> TrackStart(nElements);
-    for (size_t TrackNum = 0; TrackNum < TrackStart.size(); TrackNum++)
-    {
-        if (value[TrackNum] < 1)
-            throw std::string("Tracks starts must be >= 1");
-        if ((TrackNum > 0) && (value[TrackNum] <= CCDMultiTrack::TrackStart(TrackNum - 1)))
-            throw std::string("Tracks starts must be in ascending order");
-        /* Copy the new data */
-        TrackStart[TrackNum] = value[TrackNum];
+    int totalHeight = 0;
+    for (size_t i = 0; i < mValid.size(); i++) {
+        totalHeight += CCDMultiTrack::dataHeight(i);
     }
-    if (mTrackStart != TrackStart)
-        mTrackStart = TrackStart;
-    std::vector<int> TrackEnd(mTrackStart.size());
-    /* If binning is already set, this can define the track end. */
-    for (size_t TrackNum = 0; TrackNum < TrackEnd.size(); TrackNum++)
-        TrackEnd[TrackNum] = CCDMultiTrack::TrackStart(TrackNum) + TrackHeight(TrackNum) - 1;
-    std::vector<int> TrackBin(mTrackStart.size());
-    /* If track end is already set, this can define the binning. */
-    for (size_t TrackNum = 0; TrackNum < TrackBin.size(); TrackNum++)
-        TrackBin[TrackNum] = CCDMultiTrack::TrackBin(TrackNum);
-    if (mTrackEnd != TrackEnd)
-    {
-        mTrackEnd = TrackEnd;
-        mPortDriver->doCallbacksInt32Array(&(mTrackEnd[0]), mTrackEnd.size(), CCDMultiTrackEnd(), 0);
-    }
-    if (mTrackBin != TrackBin)
-    {
-        mTrackBin = TrackBin;
-        mPortDriver->doCallbacksInt32Array(&(mTrackBin[0]), mTrackBin.size(), CCDMultiTrackBin(), 0);
-    }
-}
-
-void CCDMultiTrack::writeTrackEnd(epicsInt32 *value, size_t nElements)
-{
-    std::vector<int> TrackEnd(nElements);
-    mTrackEnd.resize(nElements);
-    for (size_t TrackNum = 0; TrackNum < TrackEnd.size(); TrackNum++)
-    {
-        if (value[TrackNum] < 2)
-            throw std::string("Tracks ends must be >= 2");
-        if ((TrackNum > 0) && (value[TrackNum] <= CCDMultiTrack::TrackEnd(TrackNum - 1)))
-            throw std::string("Tracks ends must be in ascending order");
-        /* Copy the new data */
-        TrackEnd[TrackNum] = value[TrackNum];
-    }
-    if (mTrackEnd != TrackEnd)
-        mTrackEnd = TrackEnd;
-    std::vector<int> TrackBin(mTrackEnd.size());
-    /* If track start is already set, this can define the binning */
-    for (size_t TrackNum = 0; TrackNum < TrackBin.size(); TrackNum++)
-        TrackBin[TrackNum] = TrackHeight(TrackNum);
-    if (mTrackBin != TrackBin)
-    {
-        mTrackBin = TrackBin;
-        mPortDriver->doCallbacksInt32Array(&(mTrackBin[0]), mTrackBin.size(), CCDMultiTrackBin(), 0);
-    }
-}
-
-void CCDMultiTrack::writeTrackBin(epicsInt32 *value, size_t nElements)
-{
-    std::vector<int> TrackBin(nElements);
-    for (size_t TrackNum = 0; TrackNum < TrackBin.size(); TrackNum++)
-    {
-        if (value[TrackNum] < 1)
-            throw std::string("The track binning must be >= 1.");
-        if (TrackHeight(TrackNum) % value[TrackNum] != 0)
-            throw std::string("Track height must be divisible by binning.");
-        /* Copy the new data */
-        TrackBin[TrackNum] = value[TrackNum];
-    }
-    if (mTrackBin != TrackBin)
-        mTrackBin = TrackBin;
-}
-
-asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value, size_t nElements)
-{
-    int function = pasynUser->reason;
-    asynStatus status = asynSuccess;
-
-    if (function == CCDMultiTrackStart())
-        writeTrackStart(value, nElements);
-    else if (function == CCDMultiTrackEnd())
-        writeTrackEnd(value, nElements);
-    else if (function == CCDMultiTrackBin())
-        writeTrackBin(value, nElements);
-    else {
-        status = asynError;
-    }
-    return status;
-}
-
-int CCDMultiTrack::DataHeight() const
-{
-    int DataHeight = 0;
-    for (size_t TrackNum = 0; TrackNum < size(); TrackNum++)
-        DataHeight += CCDMultiTrack::DataHeight(TrackNum);
-    return DataHeight;
+    return totalHeight;
 }
