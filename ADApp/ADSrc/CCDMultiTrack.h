@@ -42,7 +42,7 @@ class ADCORE_API CCDMultiTrack
         return mMessages;
     }
     /** Elements after binning, for a given validated track */
-    int dataHeight(size_t trackNum) const;
+    size_t dataHeight(size_t trackNum) const;
     /** Total elements in Y direction, after binning */
     size_t totalDataHeight() const;
     /** Set multi-track attributes on output NDArray */
