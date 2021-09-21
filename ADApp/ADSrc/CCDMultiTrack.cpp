@@ -6,14 +6,16 @@
  *
  * There are 3 use cases:
  *    1 - The user sets only the track start array.
- *        This provides a single height track at thos positions.
+ *        This provides a single height track at those positions.
  *    2 - The user sets the start and end tracks arrays.
  *        This provides a fully-binned track between the start and end positions.
  *    3 - The user provides start, end and binning values.
  *        This provides (a less than fully binned) track between the start and end positions.
  *
- * @author Peter Heesterman
- * @date Nov 2019
+ * Based on previous work by Peter Heesterman
+ *
+ * @author Colin Hogben,
+ * @date Sep 2021
  *
  */
 
@@ -25,17 +27,17 @@
 #endif
 
 /** Parameter strings to tie into asyn records */
-static const char* CCDMultiTrackStartString = "CCD_MULTI_TRACK_START";
-static const char* CCDMultiTrackEndString = "CCD_MULTI_TRACK_END";
-static const char* CCDMultiTrackBinString = "CCD_MULTI_TRACK_BIN";
+#define CCDMultiTrackStartString "CCD_MULTI_TRACK_START"
+#define CCDMultiTrackEndString "CCD_MULTI_TRACK_END"
+#define CCDMultiTrackBinString "CCD_MULTI_TRACK_BIN"
 
-static const char* driverName = "CCDMultiTrack";
+static const char* const driverName = "CCDMultiTrack";
 
 CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
 {
     mPortDriver = asynPortDriver;
-    /* Semi-sensible value for old AD instances */
-    mMaxSizeY = 1024;
+    /* Semi-sensible value for old AD instances which don't call setMaxSize() */
+    mMaxSizeY = 5000;
     /* Create parameters and get indices */
     asynPortDriver->createParam(CCDMultiTrackStartString, asynParamInt32Array, &mCCDMultiTrackStart);
     asynPortDriver->createParam(CCDMultiTrackEndString, asynParamInt32Array, &mCCDMultiTrackEnd);
@@ -142,15 +144,59 @@ void CCDMultiTrack::validate()
         } else if (mUserStart[i] > (int) mMaxSizeY - 1) {
             addMessage("Track %d start (%d) beyond last row (%d)",
                     i+1, mUserStart[i], (int) mMaxSizeY - 1);
-            region.offset = mMaxSizeY - 1;
+            region.offset = mMaxSizeY - (numRegions - i);
         } else if (mUserStart[i] > (int) (mMaxSizeY - (numRegions - i))) {
             addMessage("Track %d start (%d) leaves no space for %d more track(s)",
                     i+1, mUserStart[i], (int) numRegions - i - 1);
-            region.offset = mMaxSizeY - (numRegions - 1);
+            region.offset = mMaxSizeY - (numRegions - i);
         } else {
             region.offset = mUserStart[i];
         }
-        // FIXME size, binning
+
+        if (i >= mUserEnd.size()) {
+            region.size = 1;
+        } else if (mUserEnd[i] < 0) {
+            addMessage("Track %d end (%d) less than 0",
+                    i+1, mUserEnd[i]);
+            region.size = 1;
+        } else if (mUserEnd[i] < mUserStart[i]) {
+            addMessage("Track %d end (%d) less than start (%d)",
+                    i+1, mUserEnd[i], mUserStart[i]);
+            region.size = 1;
+        } else if (mUserEnd[i] < (int) region.offset) {
+            // Start has been adjusted, so may be consequential
+            region.size = 1;
+        } else if (mUserEnd[i] > (int) mMaxSizeY - 1) {
+            addMessage("Track %d end (%d) beyond last row (%d)",
+                    i+1, mUserEnd[i], (int) mMaxSizeY - 1);
+            region.size = mMaxSizeY - region.offset - (numRegions - i - 1);
+        } else if (mUserEnd[i] > (int)(mMaxSizeY - (numRegions - i))) {
+            addMessage("Track %d end (%d) leaves no space for %d more track(s)",
+                    i+1, mUserEnd[i], (int) numRegions - i - 1);
+            region.size = mMaxSizeY - region.offset - (numRegions - i - 1);
+        } else {
+            region.size = mUserEnd[i] + 1 - region.offset;
+        }
+
+        if (i >= mUserBin.size()) {
+            region.binning = region.size; // Fully binned
+        } else if (mUserBin[i] < 1) {
+            addMessage("Track %d binning (%d) is less than 1",
+                    i, mUserBin[i]);
+            region.binning = 1;
+        } else if (mUserBin[i] > (int) region.size) {
+            addMessage("Track %d binning (%d) is less than track size (%zd)",
+                    i, mUserBin[i], region.size);
+            region.binning = region.size;
+        } else {
+            region.binning = mUserBin[i];
+            if (region.size % mUserBin[i] != 0) {
+                addMessage("Track %d binning (%d) does not divide size (%zd)",
+                        i, mUserBin[i], region.size);
+                region.size = (region.size / region.binning) * region.binning;
+            }
+        }
+
         printf("%s:%s region[%u] offset=%zd size=%zd binning=%d\n",
                 driverName,__func__,
                 i, region.offset, region.size, region.binning);
