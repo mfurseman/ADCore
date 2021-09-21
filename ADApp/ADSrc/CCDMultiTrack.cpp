@@ -27,6 +27,8 @@ static const char* CCDMultiTrackBinString = "CCD_MULTI_TRACK_BIN";
 CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
 {
     mPortDriver = asynPortDriver;
+    /* Semi-sensible value for old AD instances */
+    mMaxSizeY = 1024;
     /* Create parameters and get indices */
     asynPortDriver->createParam(CCDMultiTrackStartString, asynParamInt32Array, &mCCDMultiTrackStart);
     asynPortDriver->createParam(CCDMultiTrackEndString, asynParamInt32Array, &mCCDMultiTrackEnd);
@@ -152,6 +154,13 @@ void CCDMultiTrack::storeTrackAttributes(NDAttributeList* pAttributeList)
             pAttributeList->add(name, desc, NDAttrInt32, &bin);
         }
     }
+}
+
+size_t CCDMultiTrack::dataHeight(size_t trackNum) const
+{
+    return (trackNum < mValid.size())
+        ? mValid[trackNum].size / mValid[trackNum].binning
+        : 0;
 }
 
 size_t CCDMultiTrack::totalDataHeight() const
