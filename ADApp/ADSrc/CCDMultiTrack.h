@@ -19,10 +19,11 @@ class ADCORE_API CCDMultiTrack
 {
  public:
     /** Constructor, supplying AD instance.
-     * This allows creation of paramneters and setting of validated
+     * This allows creation of parameters and setting of validated
      * (read-back) values.
+     * The optional asynUser allows output of tracing information.
      */
-    CCDMultiTrack(asynPortDriver* asynPortDriver);
+    CCDMultiTrack(asynPortDriver* asynPortDriver, asynUser *pasynUser=0);
     /** Set the Y size of the CCD, used for validation */
     void setMaxSize(size_t maxSizeY);
     /** Handler for int32 array setting.
@@ -102,6 +103,7 @@ class ADCORE_API CCDMultiTrack
 
 private:
     asynPortDriver* mPortDriver;
+    asynUser* mAsynUser;
     /** Parameter indexes */
     int mCCDMultiTrackStart;
     int mCCDMultiTrackEnd;
