@@ -33,27 +33,24 @@
 
 static const char* const driverName = "CCDMultiTrack";
 
-#define TRACE(fmt,...) do {if (mAsynUser) asynPrint(mAsynUser, ASYN_TRACEIO_DEVICE, "%s:%s " fmt "\n", driverName, __func__, __VA_ARGS__);} while (0)
+#define TRACE(fmt,...) asynPrint(pasynUser, ASYN_TRACEIO_DEVICE, "%s:%s " fmt "\n", driverName, __func__, __VA_ARGS__)
 
-CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver, asynUser *pasynUser)
+CCDMultiTrack::CCDMultiTrack(asynPortDriver* asynPortDriver)
 {
     mPortDriver = asynPortDriver;
-    mAsynUser = pasynUser;
     /* Semi-sensible value for old AD instances which don't call setMaxSize() */
     mMaxSizeY = 5000;
     /* Create parameters and get indices */
     asynPortDriver->createParam(CCDMultiTrackStartString, asynParamInt32Array, &mCCDMultiTrackStart);
     asynPortDriver->createParam(CCDMultiTrackEndString, asynParamInt32Array, &mCCDMultiTrackEnd);
     asynPortDriver->createParam(CCDMultiTrackBinString, asynParamInt32Array, &mCCDMultiTrackBin);
-    TRACE("params: Start=%d, End=%d, Bin=%d",
-            mCCDMultiTrackStart, mCCDMultiTrackEnd, mCCDMultiTrackBin);
 }
 
 /** Set size of CCD */
-void CCDMultiTrack::setMaxSize(size_t maxSizeY) {
+void CCDMultiTrack::setMaxSize(asynUser *pasynUser, size_t maxSizeY) {
     TRACE("maxSizeY = %zd", maxSizeY);
     mMaxSizeY = maxSizeY;
-    _validate();
+    _validate(pasynUser);
 }
 
 /** Handle array from user */
@@ -88,7 +85,7 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
     if (puserArray) {
         if (! (valueArray == *puserArray)) {
             *puserArray = valueArray;
-            _validate();
+            _validate(pasynUser);
 
             for (unsigned m = 0; m < mMessages.size(); m++) {
                 TRACE("message %s", mMessages[m].c_str());
@@ -101,10 +98,10 @@ asynStatus CCDMultiTrack::writeInt32Array(asynUser *pasynUser, epicsInt32 *value
     return status;
 }
 
-void CCDMultiTrack::_validate()
+void CCDMultiTrack::_validate(asynUser *pasynUser)
 {
     /* Call the virtual method to check/adjust; result in mValid */
-    validate();
+    validate(pasynUser);
 
     /* Write adjusted values back */
     std::vector<int> validStart(size());
@@ -137,7 +134,7 @@ void CCDMultiTrack::addMessage(const char *fmt, ...)
 /** Derive valid regions from user settings.
  * Record messages about any invalid values, adjusting where necessary.
  */
-void CCDMultiTrack::validate()
+void CCDMultiTrack::validate(asynUser *pasynUser)
 {
     std::vector<NDDimension_t> regions;
     mMessages.resize(0);
