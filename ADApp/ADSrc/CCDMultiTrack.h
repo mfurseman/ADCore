@@ -12,25 +12,44 @@
 #define CCD_MULTI_TRACK_H
 
 #include <asynPortDriver.h>
-#include <NDAttributeList.h>
+#include <NDArray.h>
 #include <ADCoreAPI.h>
 
 class ADCORE_API CCDMultiTrack
 {
-    asynPortDriver* mPortDriver;
+ public:
+    /** Constructor, supplying AD instance.
+     * This allows creation of parameters and setting of validated
+     * (read-back) values.
+     */
+    CCDMultiTrack(asynPortDriver* asynPortDriver);
 
-    int mCCDMultiTrackStart;
-    int mCCDMultiTrackEnd;
-    int mCCDMultiTrackBin;
-
-    std::vector<int> mTrackStart;
-    std::vector<int> mTrackEnd;
-    std::vector<int> mTrackBin;
-
-public:
+    /** Set the Y size of the CCD, used for validation */
+    void setMaxSize(asynUser *pasynUser, size_t maxSizeY);
+    /** Handler for int32 array setting.
+     * Returns asynError if parameter unknown to CCDMultiTrack.
+     */
+    asynStatus writeInt32Array(asynUser *pasynUser, epicsInt32 *value, size_t nElements);
+    /** Number of tracks defined (number of start positions) */
     size_t size() const {
-        return mTrackStart.size();
+        return mValid.size();
     }
+    /** Get list of track definitions after validation */
+    std::vector<NDDimension_t> validTracks() {
+        return mValid;
+    }
+    /** Get list of messages from validation */
+    std::vector<std::string> validationMessages() {
+        return mMessages;
+    }
+    /** Elements after binning, for a given validated track */
+    size_t dataHeight(size_t trackNum) const;
+    /** Total elements in Y direction, after binning */
+    size_t totalDataHeight() const;
+    /** Set multi-track attributes on output NDArray */
+    void storeTrackAttributes(NDAttributeList* pAttributeList);
+
+    /** Legacy methods */
     int CCDMultiTrackStart() const {
         return mCCDMultiTrackStart;
     }
@@ -40,33 +59,57 @@ public:
     int CCDMultiTrackBin() const {
         return mCCDMultiTrackBin;
     }
-    int TrackStart(size_t TrackNum) const {
-        return (TrackNum < mTrackStart.size()) ? mTrackStart[TrackNum] : 0;
+    int TrackStart(size_t trackNum) const {
+        return (trackNum < size()) ? mValid[trackNum].offset : 0;
     };
-    int TrackEnd(size_t TrackNum) const {
-        return (TrackNum < mTrackEnd.size()) ? mTrackEnd[TrackNum] : TrackStart(TrackNum);
+    int TrackEnd(size_t trackNum) const {
+        return (trackNum < size()) ? mValid[trackNum].offset + mValid[trackNum].size - 1 : 0;
     }
-    int TrackHeight(size_t TrackNum) const {
-        return TrackEnd(TrackNum) + 1 - TrackStart(TrackNum);
+    int TrackHeight(size_t trackNum) const {
+        return (trackNum < size()) ? mValid[trackNum].size : 1;
     }
-    int TrackBin(size_t TrackNum) const {
-        return (TrackNum < mTrackBin.size()) ? mTrackBin[TrackNum] : TrackHeight(TrackNum);
+    int TrackBin(size_t trackNum) const {
+        return (trackNum < size()) ? mValid[trackNum].binning : 1;
     }
-    int DataHeight() const;
-    int DataHeight(size_t TrackNum) const {
-        return TrackHeight(TrackNum) / TrackBin(TrackNum);
+    int DataHeight() const {
+        return totalDataHeight();
+    }
+    int DataHeight(size_t trackNum) const {
+        return dataHeight(trackNum);
     }
 
-    CCDMultiTrack(asynPortDriver* asynPortDriver);
-    asynStatus writeInt32Array(asynUser *pasynUser, epicsInt32 *value, size_t nElements);
+ protected:
+    /** Size of CCD in Y direction */
+    size_t mMaxSizeY;
+    /** Arrays as set by user */
+    std::vector<int> mUserStart;
+    std::vector<int> mUserEnd;
+    std::vector<int> mUserBin;
+    /** Regions coerced to be valid */
+    std::vector<NDDimension_t> mValid;
+    /** Messages from validation */
+    std::vector<std::string> mMessages;
 
-    void storeTrackAttributes(NDAttributeList* pAttributeList);
+    /** Check and convert to a valid set of track definitions
+     * Reads mUserStart/End/Bin, sets mValid[] and mMessages[].
+     * A subclass can override this, if it needs to apply more
+     * stringent constraints e.g. symmetry, binning range etc.
+     */
+    virtual void validate(asynUser *pasynUser);
+
+    /** For use within validate() */
+    void addMessage(const char *fmt, ...)
+        EPICS_PRINTF_STYLE(2,3);
 
 private:
-    void writeTrackStart(epicsInt32 *value, size_t nElements);
-    void writeTrackEnd(epicsInt32 *value, size_t nElements);
-    void writeTrackBin(epicsInt32 *value, size_t nElements);
-
+    asynPortDriver* mPortDriver;
+    /** Parameter indexes */
+    int mCCDMultiTrackStart;
+    int mCCDMultiTrackEnd;
+    int mCCDMultiTrackBin;
+    /** Validation */
+    bool mValidated;
+    void _validate(asynUser *pasynUser);
 };
 
 #endif //CCD_MULTI_TRACK_H
